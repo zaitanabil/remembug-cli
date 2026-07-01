@@ -1,6 +1,6 @@
 {
   "name": "@devzen/remembug-server",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "license": "Apache-2.0",
   "description": "Remembug team sync server — v0.2 scaffold only",

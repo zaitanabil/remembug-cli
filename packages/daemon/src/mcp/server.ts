@@ -25,7 +25,7 @@ export async function startMcpServer(options: McpServerOptions): Promise<void> {
   const embedder = options.embedder ?? new LocalEmbedder();
 
   const server = new Server(
-    { name: 'remembug', version: '0.1.9' },
+    { name: 'remembug', version: '0.1.10' },
     { capabilities: { tools: {} } },
   );
 

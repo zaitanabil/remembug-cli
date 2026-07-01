@@ -1,6 +1,6 @@
 {
   "name": "@devzen/remembug-cli",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": false,
   "license": "Apache-2.0",
   "description": "Remembug CLI — a Stack-Overflow-style knowledge base for Claude Code debugging sessions",

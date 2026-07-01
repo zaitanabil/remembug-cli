@@ -15,7 +15,7 @@ program
   .description(
     'Remembug — a Stack-Overflow-style knowledge base for Claude Code debugging sessions',
   )
-  .version('0.1.9');
+  .version('0.1.10');
 
 registerInit(program);
 registerConfig(program);
