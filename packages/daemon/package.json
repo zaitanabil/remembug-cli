@@ -1,0 +1,43 @@
+{
+  "name": "@devzen/remembug-daemon",
+  "version": "0.1.9",
+  "private": false,
+  "license": "Apache-2.0",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/server.d.ts",
+      "import": "./dist/mcp/server.js"
+    }
+  },
+  "bin": {
+    "remembug-daemon": "./dist/bin/daemon.js",
+    "remembug-mcp": "./dist/bin/mcp.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.1",
+    "@devzen/remembug-shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "better-sqlite3": "^11.3.0",
+    "sqlite-vec": "^0.1.4-alpha.2",
+    "yaml": "^2.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11"
+  }
+}

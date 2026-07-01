@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Remembug — social preview</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap');
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        width: 1280px;
+        height: 640px;
+        overflow: hidden;
+        font-family: 'Inter', sans-serif;
+      }
+      .card {
+        position: relative;
+        width: 1280px;
+        height: 640px;
+        background:
+          radial-gradient(900px 500px at 78% -8%, rgba(245, 181, 68, 0.14), transparent 60%),
+          radial-gradient(700px 600px at -6% 110%, rgba(124, 158, 255, 0.12), transparent 55%),
+          linear-gradient(160deg, #0d1117 0%, #11161f 55%, #0b0e14 100%);
+        color: #e6edf3;
+        overflow: hidden;
+      }
+      /* faint grid */
+      .card::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+        background-size: 40px 40px;
+        mask-image: linear-gradient(120deg, #000 20%, transparent 75%);
+      }
+      .brand {
+        position: absolute;
+        top: 54px;
+        left: 64px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .logo {
+        width: 44px;
+        height: 44px;
+        border-radius: 11px;
+        background: linear-gradient(145deg, #f5b544, #e8893f);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 6px 22px rgba(245, 181, 68, 0.35);
+      }
+      .logo svg {
+        width: 26px;
+        height: 26px;
+      }
+      .wordmark {
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700;
+        font-size: 27px;
+        letter-spacing: -0.5px;
+        color: #fff;
+      }
+      .wordmark .dot {
+        color: #f5b544;
+      }
+      h1 {
+        position: absolute;
+        top: 150px;
+        left: 64px;
+        width: 700px;
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700;
+        font-size: 70px;
+        line-height: 1.04;
+        letter-spacing: -2px;
+        color: #ffffff;
+      }
+      h1 .accent {
+        color: #f5b544;
+      }
+      .sub {
+        position: absolute;
+        top: 360px;
+        left: 65px;
+        width: 590px;
+        font-size: 22px;
+        line-height: 1.5;
+        color: #9fb0c3;
+        font-weight: 400;
+      }
+      .sub b {
+        color: #d7e2ee;
+        font-weight: 600;
+      }
+      .install {
+        position: absolute;
+        left: 65px;
+        top: 486px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 20px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        padding: 14px 20px;
+        border-radius: 12px;
+      }
+      .install .prompt {
+        color: #f5b544;
+        font-weight: 700;
+      }
+      .install .cmd {
+        color: #e6edf3;
+      }
+      .chips {
+        position: absolute;
+        left: 65px;
+        top: 566px;
+        display: flex;
+        gap: 10px;
+        font-size: 14.5px;
+        color: #8b9bb0;
+        font-weight: 500;
+      }
+      .chip {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        padding: 7px 15px;
+      }
+      /* terminal on the right */
+      .term {
+        position: absolute;
+        top: 150px;
+        right: 60px;
+        width: 470px;
+        height: 360px;
+        background: rgba(13, 17, 23, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+        overflow: hidden;
+      }
+      .term-bar {
+        height: 40px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 16px;
+        background: rgba(255, 255, 255, 0.04);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      }
+      .term-bar i {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .term-title {
+        margin-left: 10px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        color: #6e7d90;
+      }
+      .term-body {
+        padding: 20px 22px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 15px;
+        line-height: 1.85;
+      }
+      .l-prompt {
+        color: #f5b544;
+      }
+      .l-cmd {
+        color: #e6edf3;
+      }
+      .l-dim {
+        color: #6e7d90;
+      }
+      .l-hit {
+        color: #7ee787;
+      }
+      .l-score {
+        color: #7c9eff;
+      }
+      .pill {
+        position: absolute;
+        top: 70px;
+        right: 60px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        color: #f5b544;
+        border: 1px solid rgba(245, 181, 68, 0.4);
+        background: rgba(245, 181, 68, 0.08);
+        padding: 7px 14px;
+        border-radius: 999px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="pill">MCP&nbsp;·&nbsp;for Claude Code</div>
+
+      <div class="brand">
+        <span class="logo">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path
+              d="M12 2.5c-3.6 0-6 2.3-6 5.4 0 1.7.8 3 2 4-.5.9-1.4 1.5-1.4 1.5s2 .4 3.2-.4c.7.2 1.4.3 2.2.3 3.6 0 6-2.3 6-5.4S15.6 2.5 12 2.5Z"
+              fill="#1a1205"
+            />
+            <circle cx="9.7" cy="8" r="1.25" fill="#f5b544" />
+            <circle cx="14.3" cy="8" r="1.25" fill="#f5b544" />
+          </svg>
+        </span>
+        <span class="wordmark">Remembug<span class="dot">.</span></span>
+      </div>
+
+      <h1>Give Claude&nbsp;Code<br />a <span class="accent">memory</span>.</h1>
+
+      <p class="sub">
+        Capture the fix the moment you solve a bug — then let Claude <b>search it back via MCP</b>.
+        Stop re-debugging the same errors.
+      </p>
+
+      <div class="install">
+        <span class="prompt">$</span><span class="cmd">npm i -g @devzen/remembug-cli</span>
+      </div>
+
+      <div class="chips">
+        <span class="chip">local SQLite</span>
+        <span class="chip">no servers</span>
+        <span class="chip">private by default</span>
+        <span class="chip">Apache-2.0</span>
+      </div>
+
+      <div class="term">
+        <div class="term-bar">
+          <i style="background: #ff5f56"></i><i style="background: #ffbd2e"></i
+          ><i style="background: #27c93f"></i>
+          <span class="term-title">remembug search</span>
+        </div>
+        <div class="term-body">
+          <div><span class="l-prompt">$</span> <span class="l-cmd">remembug search</span></div>
+          <div><span class="l-cmd">&nbsp;&nbsp;"vitest port already in use"</span></div>
+          <div style="height: 8px"></div>
+          <div>
+            <span class="l-score">[0.84]</span>
+            <span class="l-hit">Fix EADDRINUSE on</span>
+          </div>
+          <div>
+            <span class="l-hit"
+              >&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;parallel vitest workers</span
+            >
+          </div>
+          <div class="l-dim">
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;tags: vitest, ports, eaddrinuse
+          </div>
+          <div style="height: 10px"></div>
+          <div class="l-dim">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✓ solved this before — reused</div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

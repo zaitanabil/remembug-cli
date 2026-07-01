@@ -1,0 +1,17 @@
+{
+  "name": "@devzen/remembug-server",
+  "version": "0.1.9",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Remembug team sync server — v0.2 scaffold only",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@devzen/remembug-shared": "workspace:*"
+  }
+}

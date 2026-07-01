@@ -1,0 +1,58 @@
+name: Bug report
+description: Something broken or behaving unexpectedly.
+title: '[bug]: '
+labels: ['bug', 'needs-triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. **Do not include secret material** (API keys, tokens, transcripts containing credentials). If you found a privacy/security leak in Remembug itself, see [SECURITY.md](https://github.com/zaitanabil/remembug/blob/main/SECURITY.md) instead.
+  - type: input
+    id: version
+    attributes:
+      label: Remembug version
+      description: Output of `remembug --version`.
+      placeholder: '0.1.0'
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: Output of `node --version`.
+      placeholder: 'v20.18.0'
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Linux
+        - Windows (WSL)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug. Include `~/.remembug/logs/daemon.log` excerpts if relevant — review them for accidental secret material first.
+      placeholder: 'When I run `remembug review`, the TUI exits immediately and…'
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The commands or steps that reliably trigger the bug.
+      render: shell
+    validations:
+      required: true

@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a new feature or enhancement.
+title: '[feat]: '
+labels: ['enhancement', 'needs-triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening, check the [non-goals](https://github.com/zaitanabil/remembug/blob/main/docs/architecture.md#non-goals) section of the architecture doc. We deliberately keep Remembug small.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the user-facing pain. We optimize for "I keep hitting X" framing over "wouldn't it be nice if".
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: One paragraph. If you have a sketch of an API or CLI shape, drop it in.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds, related issues, other tools that already solve this.
+    validations:
+      required: false

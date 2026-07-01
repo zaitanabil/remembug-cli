@@ -1,0 +1,53 @@
+{
+  "name": "@devzen/remembug-cli",
+  "version": "0.1.9",
+  "private": false,
+  "license": "Apache-2.0",
+  "description": "Remembug CLI — a Stack-Overflow-style knowledge base for Claude Code debugging sessions",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "anthropic",
+    "knowledge-base",
+    "mcp",
+    "debugging",
+    "developer-tools"
+  ],
+  "homepage": "https://github.com/zaitanabil/remembug-cli#readme",
+  "bugs": {
+    "url": "https://github.com/zaitanabil/remembug-cli/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zaitanabil/remembug-cli.git",
+    "directory": "packages/cli"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "remembug": "./dist/index.js",
+    "remembug-daemon": "./dist/bin/remembug-daemon.js",
+    "remembug-mcp": "./dist/bin/remembug-mcp.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@devzen/remembug-daemon": "workspace:*",
+    "@devzen/remembug-shared": "workspace:*",
+    "commander": "^12.1.0",
+    "ink": "^5.0.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12"
+  }
+}
