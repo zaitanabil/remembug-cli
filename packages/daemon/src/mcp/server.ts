@@ -107,8 +107,13 @@ export async function startMcpServer(options: McpServerOptions): Promise<void> {
           };
       }
     } catch (e) {
+      // Don't surface internal exception text (zod/SQLite internals) to the
+      // MCP client; log it locally for debugging instead.
+      process.stderr.write(
+        `[remembug-mcp] tool error: ${e instanceof Error ? e.message : String(e)}\n`,
+      );
       return {
-        content: [{ type: 'text', text: e instanceof Error ? e.message : 'Unknown error' }],
+        content: [{ type: 'text', text: 'internal error' }],
         isError: true,
       };
     }

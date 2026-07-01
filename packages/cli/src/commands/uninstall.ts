@@ -3,7 +3,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Command } from 'commander';
-import { remembugPaths, writeFileAtomic } from '@devzen/remembug-daemon';
+import { remembugPaths, readConfig, writeFileAtomic } from '@devzen/remembug-daemon';
+import { daemonResponds } from './_daemon-probe.js';
 
 export function registerUninstall(program: Command): void {
   program
@@ -32,7 +33,7 @@ export function registerUninstall(program: Command): void {
       }
 
       await stopDaemon(paths, opts.dryRun);
-      removeHooksFromSettings(settingsPath, opts.dryRun);
+      removeHooksFromSettings(settingsPath, paths.hooksDir, opts.dryRun);
       removeMcpEntry(mcpPath, opts.dryRun);
       purgeDataIfRequested(paths.home, opts.purgeData, opts.dryRun);
 
@@ -66,6 +67,21 @@ async function stopDaemon(paths: ReturnType<typeof remembugPaths>, dryRun: boole
     return;
   }
 
+  // Only signal if a daemon is actually answering on its port. A stale pidfile
+  // (crash/reboot) may name a recycled PID belonging to an unrelated process.
+  const config = readConfig(paths);
+  if (!(await daemonResponds(config.daemon.port))) {
+    console.log(
+      '[remembug] uninstall: daemon not responding; pidfile is stale, removing (no SIGTERM).',
+    );
+    try {
+      unlinkSync(paths.pidFile);
+    } catch {
+      /* noop */
+    }
+    return;
+  }
+
   try {
     process.kill(pid, 'SIGTERM');
     console.log(`[remembug] uninstall: sent SIGTERM to daemon (pid=${pid}).`);
@@ -93,7 +109,11 @@ async function stopDaemon(paths: ReturnType<typeof remembugPaths>, dryRun: boole
   console.log('[remembug] uninstall: daemon did not exit within timeout; pidfile still present.');
 }
 
-export function removeHooksFromSettings(settingsPath: string, dryRun: boolean): void {
+export function removeHooksFromSettings(
+  settingsPath: string,
+  hooksDir: string,
+  dryRun: boolean,
+): void {
   if (!existsSync(settingsPath)) {
     console.log('[remembug] uninstall: settings.json does not exist; skipping hook removal.');
     return;
@@ -115,26 +135,24 @@ export function removeHooksFromSettings(settingsPath: string, dryRun: boolean): 
 
   let changed = false;
 
-  // Match the exact shim filenames `init` writes, not the substring
-  // "remembug": a custom REMEMBUG_HOME (e.g. /tmp/rb/hooks) has no
-  // "remembug" in its path, so substring matching would silently fail to
-  // remove the very hooks init created. Keyed per event so we never touch
-  // a user's own same-event hook.
+  // Match the ABSOLUTE shim path `init` wrote (`<hooksDir>/<shim>`), not the bare
+  // filename: a user's own hook that happens to be named post-tool-use.mjs must
+  // not be removed. Using the full path also works for a custom REMEMBUG_HOME.
   const SHIM: Record<'PostToolUse' | 'Stop', string> = {
-    PostToolUse: 'post-tool-use.mjs',
-    Stop: 'stop.mjs',
+    PostToolUse: join(hooksDir, 'post-tool-use.mjs'),
+    Stop: join(hooksDir, 'stop.mjs'),
   };
 
   for (const hookKey of ['PostToolUse', 'Stop'] as const) {
     const arr = hooks[hookKey];
     if (!Array.isArray(arr)) continue;
 
-    const shim = SHIM[hookKey];
+    const shimPath = SHIM[hookKey];
     const beforeLen = arr.length;
     const filtered = arr.filter((entry: Record<string, unknown>) => {
       const entryHooks = entry.hooks as Array<{ type?: string; command?: string }> | undefined;
       if (!Array.isArray(entryHooks)) return true;
-      return !entryHooks.some((h) => typeof h.command === 'string' && h.command.includes(shim));
+      return !entryHooks.some((h) => typeof h.command === 'string' && h.command.includes(shimPath));
     });
 
     if (filtered.length !== beforeLen) {

@@ -52,7 +52,7 @@ describe('uninstall — JSON removal logic', () => {
     });
 
     const { removeHooksFromSettings } = await import('../uninstall.js');
-    removeHooksFromSettings(settingsPath, false);
+    removeHooksFromSettings(settingsPath, '/home/user/.remembug/hooks', false);
 
     const result = readJson<{ hooks: { PostToolUse: unknown[]; Stop: unknown[] } }>(settingsPath);
     expect(result.hooks.PostToolUse).toEqual([]);
@@ -79,7 +79,7 @@ describe('uninstall — JSON removal logic', () => {
     });
 
     const { removeHooksFromSettings } = await import('../uninstall.js');
-    removeHooksFromSettings(settingsPath, false);
+    removeHooksFromSettings(settingsPath, '/tmp/rb/hooks', false);
 
     const result = readJson<{ hooks: { PostToolUse: unknown[]; Stop: unknown[] } }>(settingsPath);
     expect(result.hooks.PostToolUse).toEqual([]);
@@ -106,7 +106,7 @@ describe('uninstall — JSON removal logic', () => {
     });
 
     const { removeHooksFromSettings } = await import('../uninstall.js');
-    removeHooksFromSettings(settingsPath, false);
+    removeHooksFromSettings(settingsPath, '/home/user/.remembug/hooks', false);
 
     const result = readJson<{
       hooks: { PostToolUse: Array<{ hooks: Array<{ command: string }> }> };
@@ -132,7 +132,7 @@ describe('uninstall — JSON removal logic', () => {
     });
 
     const { removeHooksFromSettings } = await import('../uninstall.js');
-    removeHooksFromSettings(settingsPath, false);
+    removeHooksFromSettings(settingsPath, '/home/user/.remembug/hooks', false);
 
     const result = readJson<Record<string, unknown>>(settingsPath);
     expect(Array.isArray((result.hooks as Record<string, unknown>).PostToolUse)).toBe(true);
@@ -156,10 +156,10 @@ describe('uninstall — JSON removal logic', () => {
     });
 
     const { removeHooksFromSettings } = await import('../uninstall.js');
-    removeHooksFromSettings(settingsPath, false);
+    removeHooksFromSettings(settingsPath, '/home/user/.remembug/hooks', false);
     const content1 = readFileSync(settingsPath, 'utf8');
 
-    removeHooksFromSettings(settingsPath, false);
+    removeHooksFromSettings(settingsPath, '/home/user/.remembug/hooks', false);
     const content2 = readFileSync(settingsPath, 'utf8');
 
     expect(content1).toBe(content2);
@@ -173,7 +173,7 @@ describe('uninstall — JSON removal logic', () => {
     writeJson(settingsPath, original);
 
     const { removeHooksFromSettings } = await import('../uninstall.js');
-    removeHooksFromSettings(settingsPath, false);
+    removeHooksFromSettings(settingsPath, '/home/user/.remembug/hooks', false);
 
     expect(readJson(settingsPath)).toEqual(original);
   });
@@ -278,7 +278,7 @@ describe('uninstall — dry-run mode', () => {
     writeJson(mcpPath, mcpOriginal);
 
     const { removeHooksFromSettings, removeMcpEntry } = await import('../uninstall.js');
-    removeHooksFromSettings(settingsPath, true);
+    removeHooksFromSettings(settingsPath, '/home/user/.remembug/hooks', true);
     removeMcpEntry(mcpPath, true);
 
     expect(readJson(settingsPath)).toEqual(settingsOriginal);
