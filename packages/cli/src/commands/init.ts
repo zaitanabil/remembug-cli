@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Command } from 'commander';
-import { remembugPaths, ensurePaths } from '@devzen/remembug-daemon';
+import { remembugPaths, ensurePaths, writeFileAtomic } from '@devzen/remembug-daemon';
 import { hookShims } from './_hook-shims.js';
 
 /**
@@ -113,7 +113,9 @@ function mergeJsonInto(path: string, patch: Record<string, unknown>): void {
     }
   }
   const merged = deepMerge(current, patch);
-  writeFileSync(path, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+  // Atomic: this is the user's global Claude Code config — a truncated write
+  // (crash / full disk) would break their whole setup, not just remembug.
+  writeFileAtomic(path, JSON.stringify(merged, null, 2) + '\n');
 }
 
 function writeHookShims(hooksDir: string): void {

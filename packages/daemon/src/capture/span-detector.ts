@@ -24,11 +24,20 @@ interface OpenSpan extends ProblemSpan {
 }
 
 export interface SpanDetectorEvents {
-  /** Called when a problem-span resolves. Daemon turns this into a draft. */
-  onResolved: (span: ProblemSpan) => void;
+  /**
+   * Called when a problem-span resolves. The fingerprint is the detection-time
+   * one (raw error text + exit code) — computed once here so the daemon dedups
+   * on the same value the detector used, instead of recomputing from the
+   * already-canonicalized signature.
+   */
+  onResolved: (span: ProblemSpan, fingerprint: string) => void;
   /** Called when a session ends without resolution. Useful for telemetry. */
   onAbandoned?: (span: ProblemSpan) => void;
 }
+
+/** Bound in-memory spans: sessions that fail but never resolve or Stop leak otherwise. */
+const MAX_OPEN_SPANS = 1000;
+const MAX_SPAN_IDLE_MS = 30 * 60 * 1000;
 
 export class SpanDetector {
   private readonly bySession = new Map<string, OpenSpan>();
@@ -70,6 +79,7 @@ export class SpanDetector {
         events: [toolUseEvent(payload, errorText)],
         resolved: false,
       };
+      this.evictStale();
       this.bySession.set(payload.session_id, span);
       return;
     }
@@ -86,7 +96,27 @@ export class SpanDetector {
       existing.resolved = true;
       existing.resolved_at = Date.now();
       this.bySession.delete(payload.session_id);
-      this.listeners.onResolved(existing);
+      this.listeners.onResolved(existing, existing.triggerFingerprint);
+    }
+  }
+
+  /**
+   * Drop spans that have gone idle past the TTL, and hard-cap the total. A
+   * failing session that never re-runs the failing tool and never emits a Stop
+   * would otherwise pin its span (and all its event detail) in memory forever.
+   */
+  private evictStale(): void {
+    const now = Date.now();
+    const lastActivity = (s: OpenSpan): number => s.events[s.events.length - 1]?.at ?? s.started_at;
+    for (const [id, span] of this.bySession) {
+      if (now - lastActivity(span) > MAX_SPAN_IDLE_MS) this.bySession.delete(id);
+    }
+    if (this.bySession.size >= MAX_OPEN_SPANS) {
+      const oldestFirst = [...this.bySession.entries()].sort(
+        (a, b) => lastActivity(a[1]) - lastActivity(b[1]),
+      );
+      const excess = this.bySession.size - MAX_OPEN_SPANS + 1;
+      for (let i = 0; i < excess; i++) this.bySession.delete(oldestFirst[i]![0]);
     }
   }
 
@@ -112,8 +142,13 @@ export class SpanDetector {
 
 function isFailure(p: PostToolUsePayload): boolean {
   const { exit_code, error, stderr } = p.tool_response;
-  if (typeof exit_code === 'number' && exit_code !== 0) return true;
+  // A tool-level error field always means failure (non-Bash tools have no code).
   if (error && error.trim().length > 0) return true;
+  // When an exit code is present, TRUST it: git/npm/docker routinely write
+  // "error"/"warning"-ish text to stderr on a successful (exit 0) run, so the
+  // stderr-keyword heuristic must not override a clean exit.
+  if (typeof exit_code === 'number') return exit_code !== 0;
+  // No exit code (e.g. a non-shell tool): fall back to the stderr heuristic.
   if (stderr && /error|failed|fatal|cannot|denied/i.test(stderr)) return true;
   return false;
 }

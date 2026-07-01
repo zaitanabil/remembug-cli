@@ -132,10 +132,18 @@ describe('SpanDetector', () => {
     expect(onAbandoned).not.toHaveBeenCalled();
   });
 
-  it('detects failure from non-zero exit and from textual stderr cues', () => {
+  it('falls back to stderr cues only when there is NO exit code', () => {
     const det = new SpanDetector({ onResolved: vi.fn() });
-    det.observeToolUse(bashPayload({ exit_code: 0, stderr: 'fatal error: nope' }));
+    det.observeToolUse(bashPayload({ stderr: 'fatal error: nope' })); // exit_code undefined
     expect(det.openSpans()).toHaveLength(1);
+  });
+
+  it('does NOT open a span on a clean exit 0 even if stderr has scary words', () => {
+    // git/npm/docker write "error"/"warning" to stderr on successful runs; a
+    // present exit code is trusted over the stderr keyword heuristic.
+    const det = new SpanDetector({ onResolved: vi.fn() });
+    det.observeToolUse(bashPayload({ exit_code: 0, stderr: 'fatal: some remote warning' }));
+    expect(det.openSpans()).toHaveLength(0);
   });
 
   it('reset drops all in-flight spans', () => {
@@ -143,5 +151,23 @@ describe('SpanDetector', () => {
     det.observeToolUse(bashPayload({ exit_code: 1, stderr: 'x' }));
     det.reset();
     expect(det.openSpans()).toHaveLength(0);
+  });
+
+  it('passes the detection-time fingerprint to onResolved', () => {
+    const onResolved = vi.fn();
+    const det = new SpanDetector({ onResolved });
+    det.observeToolUse(bashPayload({ exit_code: 1, stderr: 'boom' }));
+    det.observeToolUse(bashPayload({ exit_code: 0 }));
+    expect(onResolved).toHaveBeenCalledTimes(1);
+    const [, fp] = onResolved.mock.calls[0]!;
+    expect(fp).toMatch(/^[a-f0-9]{16}$/);
+  });
+
+  it('caps open spans so unresolved sessions cannot leak unbounded', () => {
+    const det = new SpanDetector({ onResolved: vi.fn() });
+    for (let i = 0; i < 1100; i++) {
+      det.observeToolUse(bashPayload({ session: `s${i}`, exit_code: 1, stderr: 'x' }));
+    }
+    expect(det.openSpans().length).toBeLessThanOrEqual(1000);
   });
 });

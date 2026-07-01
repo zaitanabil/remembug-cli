@@ -4,7 +4,7 @@
  * The HOME-relative path is computed at runtime so tests can override
  * via env var (`REMEMBUG_HOME`) without monkey-patching `os.homedir`.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { RemembugConfigSchema, defaultConfig, type RemembugConfig } from '@devzen/remembug-shared';
@@ -52,7 +52,19 @@ export function readConfig(paths: RemembugPaths = remembugPaths()): RemembugConf
 
 export function writeConfig(config: RemembugConfig, paths: RemembugPaths = remembugPaths()): void {
   mkdirSync(paths.home, { recursive: true });
-  writeFileSync(paths.configFile, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  writeFileAtomic(paths.configFile, JSON.stringify(config, null, 2) + '\n');
+}
+
+/**
+ * Write a file atomically: write a temp sibling, then rename over the target.
+ * A crash or full disk mid-write can't leave a truncated file. Matters most
+ * for the user's global ~/.claude config, which remembug edits — a half-written
+ * settings.json would break their whole Claude Code setup.
+ */
+export function writeFileAtomic(path: string, data: string, mode?: number): void {
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, data, mode !== undefined ? { mode } : 'utf8');
+  renameSync(tmp, path);
 }
 
 /**

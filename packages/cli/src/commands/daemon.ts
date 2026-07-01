@@ -83,7 +83,9 @@ export function registerDaemon(program: Command): void {
         }
         throw e;
       }
-      const deadline = Date.now() + Number(opts.timeout);
+      const timeoutMs = Number(opts.timeout);
+      const deadline =
+        Date.now() + (Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 3000);
       while (Date.now() < deadline) {
         if (!existsSync(paths.pidFile)) {
           console.log(`[remembug] daemon stopped (pid ${pid}).`);

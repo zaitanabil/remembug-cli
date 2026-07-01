@@ -42,6 +42,8 @@ export interface NewEntryInput {
   origin: EntryOrigin;
   status: EntryStatus;
   project_ids?: string[];
+  /** Precomputed embedding, written atomically with the entry (see insertEntry). */
+  embedding?: Float32Array;
 }
 
 interface EntryRow {
@@ -84,14 +86,31 @@ interface VectorMatchRow {
   distance: number;
 }
 
+/** Absolute ceiling on any LIMIT the store will run, regardless of caller. */
+const MAX_QUERY_LIMIT = 100;
+function clampLimit(n: number): number {
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(Math.floor(n), MAX_QUERY_LIMIT);
+}
+
+/** Parse a JSON string column into an array, tolerating a corrupt/hand-edited row. */
+function safeJsonArray(raw: string): string[] {
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function rowToEntry(row: EntryRow): Entry {
   return {
     id: row.id,
     title: row.title,
     problem_body: row.problem_body,
     solution_body: row.solution_body,
-    tags: JSON.parse(row.tags) as string[],
-    stack: JSON.parse(row.stack) as string[],
+    tags: safeJsonArray(row.tags),
+    stack: safeJsonArray(row.stack),
     fingerprint: row.fingerprint,
     origin: row.origin,
     status: row.status,
@@ -116,8 +135,11 @@ export class Store {
       try {
         sqliteVec.load(this.db);
         vectorOk = true;
-      } catch {
+      } catch (e) {
         vectorOk = false;
+        process.stderr.write(
+          `[remembug] sqlite-vec unavailable; search falls back to keyword-only: ${(e as Error).message}\n`,
+        );
       }
     }
     this.hasVectorSupport = vectorOk;
@@ -126,8 +148,11 @@ export class Store {
     if (this.hasVectorSupport) {
       try {
         this.runRawSql(VECTOR_TABLE_SQL);
-      } catch {
+      } catch (e) {
         (this as { hasVectorSupport: boolean }).hasVectorSupport = false;
+        process.stderr.write(
+          `[remembug] entry_vectors table unavailable (dimension change?); vector search disabled: ${(e as Error).message}\n`,
+        );
       }
     }
   }
@@ -186,6 +211,14 @@ export class Store {
           'INSERT OR IGNORE INTO entry_projects (entry_id, project_id) VALUES (?, ?)',
         );
         for (const pid of input.project_ids) link.run(id, pid);
+      }
+      // Write the vector in the SAME transaction as the entry: a crash between
+      // the two would otherwise leave an entry that is keyword-searchable but
+      // never vector-rerankable, with no reconciliation path.
+      if (input.embedding && this.hasVectorSupport) {
+        this.db
+          .prepare('INSERT OR REPLACE INTO entry_vectors (entry_id, embedding) VALUES (?, ?)')
+          .run(id, Buffer.from(input.embedding.buffer));
       }
     });
     tx();
@@ -253,7 +286,7 @@ export class Store {
         [number],
         EntryRow
       >("SELECT * FROM entries WHERE status = 'published' ORDER BY updated_at DESC LIMIT ?")
-      .all(limit);
+      .all(clampLimit(limit));
     return rows.map(rowToEntry);
   }
 
@@ -286,12 +319,16 @@ export class Store {
       created_at: Date.now(),
       ...input,
     };
-    this.db
-      .prepare(
-        'INSERT INTO feedback (id, entry_id, helpful, notes, created_at) VALUES (?, ?, ?, ?, ?)',
-      )
-      .run(fb.id, fb.entry_id, fb.helpful ? 1 : 0, fb.notes ?? null, fb.created_at);
-    if (fb.helpful) this.incrementConfirmation(fb.entry_id);
+    // One transaction so the feedback row and the confirmation bump can't
+    // half-apply if the process dies between them.
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          'INSERT INTO feedback (id, entry_id, helpful, notes, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(fb.id, fb.entry_id, fb.helpful ? 1 : 0, fb.notes ?? null, fb.created_at);
+      if (fb.helpful) this.incrementConfirmation(fb.entry_id);
+    })();
     return fb;
   }
 
@@ -355,7 +392,7 @@ export class Store {
          ORDER BY bm25_score
          LIMIT ?`,
       )
-      .all(ftsQuery, 'published', limit);
+      .all(ftsQuery, 'published', clampLimit(limit));
     return rows;
   }
 
@@ -374,7 +411,7 @@ export class Store {
         [Buffer, number],
         VectorMatchRow
       >(`SELECT entry_id, distance FROM entry_vectors WHERE embedding MATCH ? ORDER BY distance LIMIT ?`)
-      .all(buf, limit);
+      .all(buf, clampLimit(limit));
     return rows.filter((r) => r.distance <= maxDistance);
   }
 

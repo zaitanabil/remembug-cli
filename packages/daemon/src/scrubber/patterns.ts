@@ -90,3 +90,21 @@ export const ENV_LINE = /^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.+?)\s*$/;
  */
 export const SECRET_NAME_ASSIGNMENT =
   /([A-Za-z0-9_.-]*(?:secret|token|password|passwd|passphrase|credentials?|api[_-]?key|access[_-]?key|private[_-]?key|auth[_-]?token|client[_-]?secret)[A-Za-z0-9_.-]*)\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/gi;
+
+/**
+ * The same credential-named key, but serialized as JSON/YAML `"key": value`.
+ * The key must be quoted so we don't nuke `host:port` or `12:34:56`; the value
+ * (quoted, or an unquoted run up to a delimiter) is redacted. Group 1 is the
+ * key. This is the dominant real-world shape (any JSON logger emits it) and the
+ * `=`-only pass above misses it.
+ */
+export const SECRET_NAME_JSON =
+  /"([A-Za-z0-9_.-]*(?:secret|token|password|passwd|passphrase|credentials?|api[_-]?key|access[_-]?key|private[_-]?key|auth[_-]?token|client[_-]?secret)[A-Za-z0-9_.-]*)"\s*:\s*("[^"]*"|'[^']*'|[^\s,;}\]]+)/gi;
+
+/**
+ * Credentials embedded in a `scheme://user:pass@host` URL. The whole token can
+ * dip below the entropy threshold (short/repetitive password + long host tail),
+ * so it survives the catch-all. Redact only the `user:pass`, keeping scheme and
+ * host as debugging context. Group 1 is the scheme prefix.
+ */
+export const CONNECTION_STRING_CREDS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s:@/]+:[^\s@/]+@/gi;

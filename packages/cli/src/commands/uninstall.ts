@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Command } from 'commander';
-import { remembugPaths } from '@devzen/remembug-daemon';
+import { remembugPaths, writeFileAtomic } from '@devzen/remembug-daemon';
 
 export function registerUninstall(program: Command): void {
   program
@@ -156,7 +156,7 @@ export function removeHooksFromSettings(settingsPath: string, dryRun: boolean): 
   }
 
   if (changed) {
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+    writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2) + '\n');
     console.log('[remembug] uninstall: settings.json updated.');
   } else {
     console.log('[remembug] uninstall: no remembug hooks found in settings.json; file unchanged.');
@@ -189,7 +189,7 @@ export function removeMcpEntry(mcpPath: string, dryRun: boolean): void {
   }
 
   delete servers.remembug;
-  writeFileSync(mcpPath, JSON.stringify(mcp, null, 2) + '\n', 'utf8');
+  writeFileAtomic(mcpPath, JSON.stringify(mcp, null, 2) + '\n');
   console.log('[remembug] uninstall: removed mcpServers.remembug from mcp.json.');
 }
 

@@ -1,6 +1,16 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync } from 'node:fs';
 import type { Command } from 'commander';
-import { remembugPaths, ensurePaths, readConfig, writeConfig } from '@devzen/remembug-daemon';
+import {
+  remembugPaths,
+  ensurePaths,
+  readConfig,
+  writeConfig,
+  writeFileAtomic,
+} from '@devzen/remembug-daemon';
+
+/** Obvious secret shapes we must never let land in the plaintext config.json. */
+const SECRET_VALUE =
+  /^(sk-ant-|sk-|rk_|pk_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|xox[abprs]-|AKIA|AIza)/;
 
 /**
  * `remembug config <get|set> <key> [value]` — minimal config CRUD.
@@ -20,7 +30,7 @@ export function registerConfig(program: Command): void {
     .action((key?: string) => {
       const config = readConfig(remembugPaths());
       if (!key) {
-        console.log(JSON.stringify(config, null, 2));
+        console.log(JSON.stringify(redactSecretValues(config), null, 2));
         return;
       }
       const value = resolveDotted(config as unknown as Record<string, unknown>, key);
@@ -40,6 +50,15 @@ export function registerConfig(program: Command): void {
         writeEnvFile(paths.home, envName, value);
 
         console.log(`[remembug] stored ${envName} in ${paths.home}/.env`);
+        return;
+      }
+      // Never let a secret land in the plaintext, world-readable config.json.
+      if (SECRET_VALUE.test(value)) {
+        console.error(
+          `[remembug] that value looks like a secret; refusing to write it to config.json.\n` +
+            `           store keys with: remembug config set anthropic-key <value>`,
+        );
+        process.exitCode = 1;
         return;
       }
       setDotted(config as unknown as Record<string, unknown>, key, parseValue(value));
@@ -82,5 +101,20 @@ function writeEnvFile(home: string, key: string, value: string): void {
   const existing = existsSync(path) ? readFileSync(path, 'utf8') : '';
   const lines = existing.split('\n').filter((l) => l.trim() && !l.startsWith(`${key}=`));
   lines.push(`${key}=${value}`);
-  writeFileSync(path, lines.join('\n') + '\n', { mode: 0o600 });
+  writeFileAtomic(path, lines.join('\n') + '\n', 0o600);
+  // The mode arg only applies when creating the file; enforce 600 even if a
+  // prior .env already existed with looser permissions.
+  chmodSync(path, 0o600);
+}
+
+/** Redact any string value that looks like a secret before printing config. */
+function redactSecretValues(value: unknown): unknown {
+  if (typeof value === 'string') return SECRET_VALUE.test(value) ? '[REDACTED]' : value;
+  if (Array.isArray(value)) return value.map(redactSecretValues);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, redactSecretValues(v)]),
+    );
+  }
+  return value;
 }
