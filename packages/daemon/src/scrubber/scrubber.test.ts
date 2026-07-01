@@ -123,7 +123,13 @@ describe('scrubber', () => {
     const token = 'kZ7q+J/3a8FpL1n2BdRwYuM5xT0vScE6'; // base64-ish, 32 chars
     const { content, redactions } = scrub(`secret=${token}`);
     expect(content).not.toContain(token);
-    expect(redactions.some((r) => r.type === 'high_entropy' || r.type === 'env_value')).toBe(true);
+    // `secret=` is caught by the named-secret layer; a bare high-entropy value
+    // elsewhere would still fall to the entropy/env layers.
+    expect(
+      redactions.some(
+        (r) => r.type === 'named_secret' || r.type === 'high_entropy' || r.type === 'env_value',
+      ),
+    ).toBe(true);
   });
 
   it('does NOT redact a 40-char git commit SHA (hex, low entropy)', () => {
@@ -281,5 +287,32 @@ describe('scrubber', () => {
     expect(content).toContain('/config'); // structure preserved
     expect(content).toContain('[REDACTED:high_entropy]'); // secret segment caught
     expect(content).not.toContain('aGk9Zx2QpL7vWdR4tY8sNb3mC6hJ1fU0eX5oI');
+  });
+
+  it('redacts a lowercased secret assignment the entropy layer misses', () => {
+    // Canonicalized error text is lowercased, which drops the value's entropy
+    // below the threshold. The named-secret layer must still catch it.
+    const secret = 'wjalrxutnfemik7mdengbpxrficyzexamplekey';
+    const { content, redactions } = scrub(`leaked aws_secret_access_key=${secret} in env dump`);
+    expect(content).toContain('aws_secret_access_key=[REDACTED:named_secret]');
+    expect(content).not.toContain(secret);
+    expect(redactions.find((r) => r.type === 'named_secret')?.count).toBe(1);
+  });
+
+  it('redacts a hex-format token the entropy layer allowlists as hash-like', () => {
+    const hex = 'deadbeefcafebabe0123456789abcdefdeadbeefcafebabe0123456789abcd';
+    const { content } = scrub(`token=${hex}`);
+    expect(content).toContain('token=[REDACTED:named_secret]');
+    expect(content).not.toContain(hex);
+  });
+
+  it('redacts a lowercase password= assignment', () => {
+    const { content } = scrub('password=hunter2trustno1');
+    expect(content).toContain('password=[REDACTED:named_secret]');
+  });
+
+  it('does NOT redact benign lowercase assignments with non-secret key names', () => {
+    expect(scrub('output=/usr/local/bin/python').content).toBe('output=/usr/local/bin/python');
+    expect(scrub('retries=12345').content).toBe('retries=12345');
   });
 });

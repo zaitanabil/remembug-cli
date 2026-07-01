@@ -79,3 +79,14 @@ export const SECRET_PATH_PATTERNS: RegExp[] = [
 
 /** A key=value line that looks like dotenv contents. */
 export const ENV_LINE = /^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.+?)\s*$/;
+
+/**
+ * `key=value` where the key NAME looks like a credential — redact the value
+ * regardless of case, position, or entropy. This is the layer that catches
+ * secrets the entropy detector misses: an all-lowercase value (lowercasing
+ * drops Shannon entropy below the threshold) or a hex token (allowlisted as
+ * hash-like), e.g. `token=<hex>` or `aws_secret_access_key=<val>` sitting
+ * mid-sentence in an error dump. Group 1 is the key (kept); the value is cut.
+ */
+export const SECRET_NAME_ASSIGNMENT =
+  /([A-Za-z0-9_.-]*(?:secret|token|password|passwd|passphrase|credentials?|api[_-]?key|access[_-]?key|private[_-]?key|auth[_-]?token|client[_-]?secret)[A-Za-z0-9_.-]*)\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/gi;

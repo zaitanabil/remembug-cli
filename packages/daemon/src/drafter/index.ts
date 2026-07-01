@@ -111,6 +111,14 @@ function coerceToString(v: unknown): unknown {
 
 /** Extract the YAML body from a ```yaml ... ``` fence. Returns null on miss. */
 export function extractYamlBlock(text: string): string | null {
+  // Prefer a fence whose closing ``` sits at the start of a line. The prompt
+  // asks the model to put ```bash/```ts snippets inside the `solution` field,
+  // and those inner fences are indented within a YAML block scalar. Anchoring
+  // the close to column 0 skips them, instead of a non-greedy match ending at
+  // the first inner fence and truncating the document (dropping later keys).
+  const outer = text.match(/^```(?:yaml|yml)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/m);
+  if (outer) return outer[1]!.trim();
+  // No column-0 close (a simple block with no embedded fences): first fence pair.
   const fence = text.match(/```(?:yaml|yml)?\s*\n([\s\S]*?)```/i);
   if (fence) return fence[1]!.trim();
   // Fallback: maybe the model emitted bare YAML.

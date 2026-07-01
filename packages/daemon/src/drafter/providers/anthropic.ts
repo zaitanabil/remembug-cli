@@ -24,10 +24,12 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   async complete(request: LLMCompletionRequest): Promise<LLMCompletionResult> {
+    // No `temperature`: current Sonnet/Opus model ids reject it with a 400
+    // ("temperature is deprecated for this model"), and drafting doesn't need
+    // a specific sampling temperature. The Ollama provider still honours it.
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: request.maxTokens ?? 4096,
-      temperature: request.temperature ?? 0.2,
       system: request.systemPrompt,
       messages: [{ role: 'user', content: request.userPrompt }],
     });
