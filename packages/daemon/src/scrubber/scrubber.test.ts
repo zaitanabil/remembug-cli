@@ -354,10 +354,27 @@ describe('scrubber', () => {
     );
   });
 
-  it('tripwire fires on a credential-named secret the pattern layer alone would miss', () => {
-    // A raw lowercase secret has no known prefix; the strengthened tripwire must
-    // still see it via the named-secret shape so the drafter refuses to send it.
-    expect(looksLikeSecretLeak('aws_secret_access_key=wjalrxutnfemik7mdengvalue')).toBe(true);
+  it('scrub (not the tripwire) redacts a credential-named secret; tripwire stays quiet on clean text', () => {
+    // The named-secret value is removed by scrub() upstream, so the text that
+    // reaches the tripwire is already clean. The tripwire itself is pattern-only.
+    expect(scrub('aws_secret_access_key=wjalrxutnfemik7mdengvalue').content).toContain(
+      '[REDACTED:named_secret]',
+    );
     expect(looksLikeSecretLeak('the build finished with 0 errors')).toBe(false);
+  });
+
+  it('tripwire still fires on a leaked prefixed secret (its belt-and-suspenders job)', () => {
+    expect(looksLikeSecretLeak('AKIAIOSFODNN7EXAMPLE')).toBe(true);
+    expect(looksLikeSecretLeak('ghp_' + 'A'.repeat(36))).toBe(true);
+  });
+
+  it('tripwire does NOT fire on an already-scrubbed secret-named assignment', () => {
+    // The scrubber already redacted the value; a secret-named key next to a
+    // [REDACTED] marker must not refuse an otherwise-clean transcript. Real env
+    // dumps (STRIPE_SECRET_KEY=, aws_secret_access_key=) are everywhere.
+    expect(looksLikeSecretLeak('STRIPE_SECRET_KEY=[REDACTED:stripe_key]')).toBe(false);
+    expect(looksLikeSecretLeak('aws_secret_access_key=[REDACTED:named_secret] in env')).toBe(false);
+    // ...but still fires if a real value survived scrubbing.
+    expect(looksLikeSecretLeak('STRIPE_SECRET_KEY=sk_live_realvalue0123456789ab')).toBe(true);
   });
 });

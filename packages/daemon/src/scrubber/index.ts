@@ -138,18 +138,14 @@ export function scrub(input: string, options: ScrubOptions = {}): ScrubResult {
  * refuse to send the transcript to the LLM.
  */
 export function looksLikeSecretLeak(input: string): boolean {
-  // Prefixed patterns plus the low-false-positive credential-named shapes
-  // (`key=secret`, `"key": secret`, `scheme://user:pass@host`). Deliberately
-  // NOT the entropy/env layers: those over-fire on benign high-entropy text,
-  // and this tripwire REFUSES the whole draft, so a false positive silently
-  // drops a real capture.
-  const guards = [
-    ...SECRET_PATTERNS.map((p) => p.regex),
-    SECRET_NAME_ASSIGNMENT,
-    SECRET_NAME_JSON,
-    CONNECTION_STRING_CREDS,
-  ];
-  return guards.some((regex) => {
+  // Pattern-only on purpose. This is a belt-and-suspenders check on text that
+  // scrub() has ALREADY processed — its named-secret / JSON / connection-string
+  // passes run upstream, so re-checking those shapes here catches nothing new
+  // and, worse, false-fires on a redacted assignment like
+  // `STRIPE_SECRET_KEY=[REDACTED:stripe_key]` (secret-named key + a marker the
+  // regex rebinds onto), silently refusing a perfectly-clean transcript. Since
+  // a false positive drops a real capture, keep this to the prefixed patterns.
+  return SECRET_PATTERNS.some(({ regex }) => {
     regex.lastIndex = 0;
     return regex.test(input);
   });
