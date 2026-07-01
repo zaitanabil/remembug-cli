@@ -111,16 +111,20 @@ function coerceToString(v: unknown): unknown {
 
 /** Extract the YAML body from a ```yaml ... ``` fence. Returns null on miss. */
 export function extractYamlBlock(text: string): string | null {
-  // Prefer a fence whose closing ``` sits at the start of a line. The prompt
+  // Prefer fences whose closing ``` sits at the start of a line. The prompt
   // asks the model to put ```bash/```ts snippets inside the `solution` field,
-  // and those inner fences are indented within a YAML block scalar. Anchoring
-  // the close to column 0 skips them, instead of a non-greedy match ending at
-  // the first inner fence and truncating the document (dropping later keys).
-  const outer = text.match(/^```(?:yaml|yml)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/m);
-  if (outer) return outer[1]!.trim();
-  // No column-0 close (a simple block with no embedded fences): first fence pair.
+  // and those inner fences are indented within a YAML block scalar, so a
+  // column-0 anchor skips them instead of truncating at the first inner fence.
+  const outer = [...text.matchAll(/^```(?:yaml|yml)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
+  // More than one top-level block is ambiguous — and an injection vector, since
+  // an extra earlier block could shadow the real one. Refuse rather than guess.
+  if (outer.length > 1) return null;
+  if (outer.length === 1) return outer[0]![1]!.trim();
+  // No column-0 close: a simple single block with no embedded fences. If the
+  // captured body still contains a fence it was truncated at an inner/indented
+  // fence — ambiguous, so refuse rather than return a fragment.
   const fence = text.match(/```(?:yaml|yml)?\s*\n([\s\S]*?)```/i);
-  if (fence) return fence[1]!.trim();
+  if (fence) return fence[1]!.includes('```') ? null : fence[1]!.trim();
   // Fallback: maybe the model emitted bare YAML.
   if (/^[a-zA-Z_][a-zA-Z0-9_]*\s*:/.test(text)) return text;
   return null;

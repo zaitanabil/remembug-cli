@@ -19,7 +19,9 @@ export class AnthropicProvider implements LLMProvider {
   private readonly model: string;
 
   constructor(options: AnthropicProviderOptions) {
-    this.client = new Anthropic({ apiKey: options.apiKey });
+    // Bound a hung draft: without a timeout the SDK's default retry/backoff can
+    // stall the span processor indefinitely on a slow/hung request.
+    this.client = new Anthropic({ apiKey: options.apiKey, timeout: 60_000, maxRetries: 2 });
     this.model = options.model;
   }
 

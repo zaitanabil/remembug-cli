@@ -315,4 +315,66 @@ describe('scrubber', () => {
     expect(scrub('output=/usr/local/bin/python').content).toBe('output=/usr/local/bin/python');
     expect(scrub('retries=12345').content).toBe('retries=12345');
   });
+
+  it('redacts secrets serialized as JSON "key": "value"', () => {
+    const { content } = scrub('{"aws_secret_access_key": "wJalrXUtnFEMIexampleVALUE"}');
+    expect(content).toContain('"aws_secret_access_key": [REDACTED:named_secret]');
+    expect(content).not.toContain('wJalrXUtnFEMIexampleVALUE');
+  });
+
+  it('redacts a JSON password with no spaces around the colon', () => {
+    const { content } = scrub('{"password":"hunter2trustno1"}');
+    expect(content).not.toContain('hunter2trustno1');
+    expect(content).toContain('[REDACTED:named_secret]');
+  });
+
+  it('does NOT redact host:port, URLs, or timestamps as if they were secrets', () => {
+    expect(scrub('connecting to token.svc.internal:8080').content).toBe(
+      'connecting to token.svc.internal:8080',
+    );
+    expect(scrub('GET https://api.example.com:443/v1/x').content).toBe(
+      'GET https://api.example.com:443/v1/x',
+    );
+    expect(scrub('finished at 12:34:56').content).toBe('finished at 12:34:56');
+  });
+
+  it('redacts credentials embedded in a connection-string URL, keeping scheme and host', () => {
+    // Not an env-line (no leading UPPER=), so the host survives as context and
+    // only the user:pass is cut. An `DB_URL=...` form is separately redacted
+    // wholesale by the env-line layer.
+    const { content } = scrub('connecting to mysql://root:root@localhost:3306/app failed');
+    expect(content).toContain('mysql://[REDACTED:connection_string]@');
+    expect(content).toContain('localhost:3306/app'); // host/db kept as context
+    expect(content).not.toContain('root:root@');
+  });
+
+  it('does NOT flag a bare scheme://host with no credentials', () => {
+    expect(scrub('cloned from https://github.com/acme/repo.git').content).toBe(
+      'cloned from https://github.com/acme/repo.git',
+    );
+  });
+
+  it('scrub (not the tripwire) redacts a credential-named secret; tripwire stays quiet on clean text', () => {
+    // The named-secret value is removed by scrub() upstream, so the text that
+    // reaches the tripwire is already clean. The tripwire itself is pattern-only.
+    expect(scrub('aws_secret_access_key=wjalrxutnfemik7mdengvalue').content).toContain(
+      '[REDACTED:named_secret]',
+    );
+    expect(looksLikeSecretLeak('the build finished with 0 errors')).toBe(false);
+  });
+
+  it('tripwire still fires on a leaked prefixed secret (its belt-and-suspenders job)', () => {
+    expect(looksLikeSecretLeak('AKIAIOSFODNN7EXAMPLE')).toBe(true);
+    expect(looksLikeSecretLeak('ghp_' + 'A'.repeat(36))).toBe(true);
+  });
+
+  it('tripwire does NOT fire on an already-scrubbed secret-named assignment', () => {
+    // The scrubber already redacted the value; a secret-named key next to a
+    // [REDACTED] marker must not refuse an otherwise-clean transcript. Real env
+    // dumps (STRIPE_SECRET_KEY=, aws_secret_access_key=) are everywhere.
+    expect(looksLikeSecretLeak('STRIPE_SECRET_KEY=[REDACTED:stripe_key]')).toBe(false);
+    expect(looksLikeSecretLeak('aws_secret_access_key=[REDACTED:named_secret] in env')).toBe(false);
+    // ...but still fires if a real value survived scrubbing.
+    expect(looksLikeSecretLeak('STRIPE_SECRET_KEY=sk_live_realvalue0123456789ab')).toBe(true);
+  });
 });

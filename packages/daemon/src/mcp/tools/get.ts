@@ -8,5 +8,9 @@ export const GetInputSchema = z.object({
 export type GetInput = z.infer<typeof GetInputSchema>;
 
 export function getTool(input: GetInput, deps: { store: Store }): Entry | undefined {
-  return deps.store.getEntry(input.entry_id);
+  // Only published entries are servable. pending_review drafts (which may be
+  // AI-drafted and unreviewed, including a prompt-injected one) must not be
+  // readable by id, matching the search/FTS gate.
+  const entry = deps.store.getEntry(input.entry_id);
+  return entry && entry.status === 'published' ? entry : undefined;
 }

@@ -10,7 +10,7 @@ import { OllamaProvider } from './drafter/providers/ollama.js';
 import type { LLMProvider } from './drafter/providers/types.js';
 import { SpanDetector } from './capture/span-detector.js';
 import { detectStack } from './capture/stack-detect.js';
-import { fingerprint, stackFingerprint } from './fingerprint/index.js';
+import { stackFingerprint } from './fingerprint/index.js';
 import { createDaemonHttp } from './http.js';
 import { LocalEmbedder, type EmbeddingProvider } from './embeddings/index.js';
 import { Store } from './store/index.js';
@@ -55,8 +55,8 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<Dae
   }
 
   const detector = new SpanDetector({
-    onResolved: (span) => {
-      onResolvedSpan(span, { store, drafter, embedder, logger }).catch((e) => {
+    onResolved: (span, fp) => {
+      onResolvedSpan(span, fp, { store, drafter, embedder, logger }).catch((e) => {
         logger.daemon('error', 'onResolvedSpan threw', {
           session_id: span.session_id,
           error: e instanceof Error ? e.message : String(e),
@@ -65,7 +65,7 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<Dae
     },
   });
 
-  const server = createDaemonHttp({ detector }, { port: config.daemon.port });
+  const server = await createDaemonHttp({ detector }, { port: config.daemon.port });
   logger.daemon('info', 'daemon started', { port: config.daemon.port });
 
   return {
@@ -105,6 +105,7 @@ async function maybeMakeDrafter(
 
 async function onResolvedSpan(
   span: ProblemSpan,
+  fp: string,
   deps: {
     store: Store;
     drafter: Drafter | undefined;
@@ -121,11 +122,7 @@ async function onResolvedSpan(
       counts: Object.fromEntries(redactions.map((r) => [r.type, r.count])),
     });
   }
-  const fp = fingerprint({
-    toolName: span.trigger.tool_name,
-    errorText: span.trigger.error_signature,
-  });
-  const stack = detectStack(span.cwd);
+  const stack = cachedDetectStack(span.cwd);
   const project = deps.store.upsertProject({
     repo_path: span.cwd,
     stack_fingerprint: stackFingerprint(stack.tokens),
@@ -140,8 +137,11 @@ async function onResolvedSpan(
   });
 
   // Dedup: if we already have an entry with this fingerprint, bump its
-  // confirmation count rather than creating a duplicate draft.
-  const existing = deps.store.findByFingerprint(fp).filter((e) => e.status === 'published');
+  // confirmation count rather than creating a duplicate draft. Includes
+  // pending_review — the same failure recurring before a human reviews the
+  // first draft should bump that draft's count, not queue a second identical
+  // one (and burn another LLM call). Only rejected entries are ignored.
+  const existing = deps.store.findByFingerprint(fp).filter((e) => e.status !== 'rejected');
   if (existing.length > 0) {
     deps.store.incrementConfirmation(existing[0]!.id);
     deps.logger.daemon('info', 'span matched existing entry; confirmation incremented', {
@@ -174,6 +174,13 @@ async function onResolvedSpan(
   }
   const flat = flattenDraft(outcome.draft);
   const draftStack = outcome.draft.stack.length > 0 ? outcome.draft.stack : stack.tokens;
+  // Compute the embedding BEFORE the insert so the entry and its vector are
+  // written in one transaction (embed is async; the DB transaction is not).
+  const embedding = deps.store.hasVectorSupport
+    ? await deps.embedder.embed(
+        `${outcome.draft.title}\n${flat.problem_body}\n${flat.solution_body}`,
+      )
+    : undefined;
   const entry = deps.store.insertEntry({
     title: outcome.draft.title,
     problem_body: flat.problem_body,
@@ -184,6 +191,7 @@ async function onResolvedSpan(
     origin: 'ai_drafted',
     status: 'pending_review',
     project_ids: [project.id],
+    embedding,
   });
   deps.store.saveRawTranscript(scrubbed, entry.id);
   deps.logger.daemon('info', 'draft queued for review', {
@@ -191,13 +199,19 @@ async function onResolvedSpan(
     fingerprint: fp,
     confidence: outcome.draft.confidence,
   });
+}
 
-  if (deps.store.hasVectorSupport) {
-    const v = await deps.embedder.embed(
-      `${entry.title}\n${entry.problem_body}\n${entry.solution_body}`,
-    );
-    deps.store.upsertVector(entry.id, v);
-  }
+// A project's stack is stable for the daemon's lifetime; detectStack does
+// several synchronous FS reads, and this runs on the same event loop that
+// serves the hook endpoint. Memoize per cwd. ponytail: no TTL — stack changes
+// are rare and a daemon restart clears it.
+const stackCache = new Map<string, ReturnType<typeof detectStack>>();
+function cachedDetectStack(cwd: string): ReturnType<typeof detectStack> {
+  const hit = stackCache.get(cwd);
+  if (hit) return hit;
+  const result = detectStack(cwd);
+  stackCache.set(cwd, result);
+  return result;
 }
 
 function renderSpan(span: ProblemSpan): string {
@@ -226,6 +240,7 @@ export {
   remembugPaths,
   readConfig,
   writeConfig,
+  writeFileAtomic,
   ensurePaths,
   loadDotenv,
   resolveApiKey,

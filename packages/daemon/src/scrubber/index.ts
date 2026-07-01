@@ -10,8 +10,10 @@
  */
 import { isHashLike, looksLikePath, shannonEntropy } from './entropy.js';
 import {
+  CONNECTION_STRING_CREDS,
   ENV_LINE,
   SECRET_NAME_ASSIGNMENT,
+  SECRET_NAME_JSON,
   SECRET_PATH_PATTERNS,
   SECRET_PATTERNS,
 } from './patterns.js';
@@ -62,6 +64,16 @@ export function scrub(input: string, options: ScrubOptions = {}): ScrubResult {
     bumpRedaction(redactions, 'named_secret');
     return `${key}=${REDACTION('named_secret')}`;
   });
+  // Same, but for JSON/YAML `"key": value` shape.
+  content = content.replace(SECRET_NAME_JSON, (_match, key: string) => {
+    bumpRedaction(redactions, 'named_secret');
+    return `"${key}": ${REDACTION('named_secret')}`;
+  });
+  // Credentials inside a scheme://user:pass@host URL.
+  content = content.replace(CONNECTION_STRING_CREDS, (_match, scheme: string) => {
+    bumpRedaction(redactions, 'connection_string');
+    return `${scheme}${REDACTION('connection_string')}@`;
+  });
 
   content = content
     .split('\n')
@@ -96,7 +108,10 @@ export function scrub(input: string, options: ScrubOptions = {}): ScrubResult {
   };
 
   content = content.replace(/\S+/g, (token) => {
-    if (token.startsWith('[REDACTED:')) return token;
+    // Skip any token that already carries a redaction marker anywhere, not just
+    // at the start — a partial redaction (e.g. `scheme://[REDACTED]@host`, or a
+    // path segment) must not be re-swallowed wholesale by the entropy pass.
+    if (token.includes('[REDACTED:')) return token;
     // Path-shaped tokens keep their structure (the project root is signal),
     // but we still entropy-scan each segment so a secret hidden as a path
     // segment — /data/<random-blob> — doesn't ride through untouched.
@@ -108,12 +123,6 @@ export function scrub(input: string, options: ScrubOptions = {}): ScrubResult {
     }
     return redactIfHighEntropy(token);
   });
-
-  for (const pathPattern of SECRET_PATH_PATTERNS) {
-    if (pathPattern.test(content)) {
-      bumpRedaction(redactions, 'secret_path_reference', 0);
-    }
-  }
 
   return {
     content,
@@ -129,6 +138,13 @@ export function scrub(input: string, options: ScrubOptions = {}): ScrubResult {
  * refuse to send the transcript to the LLM.
  */
 export function looksLikeSecretLeak(input: string): boolean {
+  // Pattern-only on purpose. This is a belt-and-suspenders check on text that
+  // scrub() has ALREADY processed — its named-secret / JSON / connection-string
+  // passes run upstream, so re-checking those shapes here catches nothing new
+  // and, worse, false-fires on a redacted assignment like
+  // `STRIPE_SECRET_KEY=[REDACTED:stripe_key]` (secret-named key + a marker the
+  // regex rebinds onto), silently refusing a perfectly-clean transcript. Since
+  // a false positive drops a real capture, keep this to the prefixed patterns.
   return SECRET_PATTERNS.some(({ regex }) => {
     regex.lastIndex = 0;
     return regex.test(input);
