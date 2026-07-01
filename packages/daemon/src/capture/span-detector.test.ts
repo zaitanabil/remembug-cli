@@ -33,6 +33,18 @@ function stopPayload(session = 's1'): StopPayload {
   };
 }
 
+function editPayload(session = 's1'): PostToolUsePayload {
+  return {
+    hook_event_name: 'PostToolUse',
+    session_id: session,
+    transcript_path: '/tmp/transcript.json',
+    cwd: '/home/dev/proj',
+    tool_name: 'Edit',
+    tool_input: { file_path: 'src/x.ts', old_string: 'a', new_string: 'b' },
+    tool_response: {},
+  };
+}
+
 describe('SpanDetector', () => {
   it('does not open a span for a successful tool call', () => {
     const onResolved = vi.fn();
@@ -75,18 +87,52 @@ describe('SpanDetector', () => {
     expect(resolved!.events.some((e) => e.detail === '$ echo hi')).toBe(true);
   });
 
-  it('resolves a span when the same tool succeeds afterwards', () => {
+  it('resolves after a fix edit, even when a DIFFERENT tool verifies it', () => {
+    // fail Bash -> Edit -> a different tool succeeds. Cross-tool verification is
+    // a real fix shape and must resolve (the old same-tool-only rule dropped it).
     const onResolved = vi.fn();
     const det = new SpanDetector({ onResolved });
     det.observeToolUse(bashPayload({ exit_code: 1, stderr: 'ENOENT' }));
-    det.observeToolUse(bashPayload({ exit_code: 0 }));
+    det.observeToolUse(editPayload());
+    det.observeToolUse({
+      ...bashPayload({ exit_code: 0 }),
+      tool_name: 'Read',
+      tool_input: { file_path: '/x' },
+    });
     expect(onResolved).toHaveBeenCalledOnce();
-    const span = onResolved.mock.calls[0]![0];
-    expect(span.resolved).toBe(true);
-    expect(span.events.length).toBe(2);
+    expect(onResolved.mock.calls[0]![0].resolved).toBe(true);
   });
 
-  it('does not resolve when a different tool succeeds', () => {
+  it('resolves when the exact failed command re-runs green after an intervening step', () => {
+    // fail `pytest` -> `pip install x` -> `pytest` passes. Install-style fixes
+    // have no Edit; the same command passing after intervening work is the signal.
+    const onResolved = vi.fn();
+    const det = new SpanDetector({ onResolved });
+    det.observeToolUse(bashPayload({ command: 'pytest', exit_code: 1, stderr: 'ModuleNotFound' }));
+    det.observeToolUse(bashPayload({ command: 'pip install x', exit_code: 0 }));
+    det.observeToolUse(bashPayload({ command: 'pytest', exit_code: 0 }));
+    expect(onResolved).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT resolve on an unrelated same-tool success (no fix activity)', () => {
+    // fail `pytest` -> `ls` succeeds. No edit, different command: not a fix.
+    const onResolved = vi.fn();
+    const det = new SpanDetector({ onResolved });
+    det.observeToolUse(bashPayload({ command: 'pytest', exit_code: 1, stderr: 'AssertionError' }));
+    det.observeToolUse(bashPayload({ command: 'ls -la', exit_code: 0 }));
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(det.openSpans()).toHaveLength(1);
+  });
+
+  it('does NOT resolve on a bare flaky re-run (same command, nothing in between)', () => {
+    const onResolved = vi.fn();
+    const det = new SpanDetector({ onResolved });
+    det.observeToolUse(bashPayload({ command: 'pytest', exit_code: 1, stderr: 'flaky' }));
+    det.observeToolUse(bashPayload({ command: 'pytest', exit_code: 0 }));
+    expect(onResolved).not.toHaveBeenCalled();
+  });
+
+  it('does not resolve when a different tool succeeds with no fix edit', () => {
     const onResolved = vi.fn();
     const det = new SpanDetector({ onResolved });
     det.observeToolUse(bashPayload({ exit_code: 1, stderr: 'ENOENT' }));
@@ -105,13 +151,14 @@ describe('SpanDetector', () => {
     det.observeToolUse(bashPayload({ session: 's1', exit_code: 1, stderr: 'a' }));
     det.observeToolUse(bashPayload({ session: 's2', exit_code: 1, stderr: 'b' }));
     expect(det.openSpans()).toHaveLength(2);
+    det.observeToolUse(editPayload('s1'));
     det.observeToolUse(bashPayload({ session: 's1', exit_code: 0 }));
     expect(onResolved).toHaveBeenCalledOnce();
     expect(det.openSpans()).toHaveLength(1);
     expect(det.openSpans()[0]!.session_id).toBe('s2');
   });
 
-  it('Stop event abandons an unresolved span via the callback', () => {
+  it('Stop abandons a span that never had a fix edit', () => {
     const onResolved = vi.fn();
     const onAbandoned = vi.fn();
     const det = new SpanDetector({ onResolved, onAbandoned });
@@ -122,11 +169,25 @@ describe('SpanDetector', () => {
     expect(det.openSpans()).toHaveLength(0);
   });
 
+  it('Stop after an edit (but no explicit re-run) is drafted, not abandoned', () => {
+    // fail -> edit -> Stop. The developer changed code and moved on; draft it and
+    // let the drafter refuse if it is not actually resolved.
+    const onResolved = vi.fn();
+    const onAbandoned = vi.fn();
+    const det = new SpanDetector({ onResolved, onAbandoned });
+    det.observeToolUse(bashPayload({ exit_code: 1, stderr: 'oops' }));
+    det.observeToolUse(editPayload());
+    det.observeStop(stopPayload());
+    expect(onResolved).toHaveBeenCalledOnce();
+    expect(onAbandoned).not.toHaveBeenCalled();
+  });
+
   it('Stop after resolution is a no-op', () => {
     const onResolved = vi.fn();
     const onAbandoned = vi.fn();
     const det = new SpanDetector({ onResolved, onAbandoned });
     det.observeToolUse(bashPayload({ exit_code: 1, stderr: 'oops' }));
+    det.observeToolUse(editPayload());
     det.observeToolUse(bashPayload({ exit_code: 0 }));
     det.observeStop(stopPayload());
     expect(onAbandoned).not.toHaveBeenCalled();
@@ -157,6 +218,7 @@ describe('SpanDetector', () => {
     const onResolved = vi.fn();
     const det = new SpanDetector({ onResolved });
     det.observeToolUse(bashPayload({ exit_code: 1, stderr: 'boom' }));
+    det.observeToolUse(editPayload());
     det.observeToolUse(bashPayload({ exit_code: 0 }));
     expect(onResolved).toHaveBeenCalledTimes(1);
     const [, fp] = onResolved.mock.calls[0]!;

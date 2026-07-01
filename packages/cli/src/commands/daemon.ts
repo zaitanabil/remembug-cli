@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Command } from 'commander';
 import { remembugPaths, readConfig } from '@devzen/remembug-daemon';
+import { daemonResponds, waitForDaemon } from './_daemon-probe.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,10 +36,20 @@ export function registerDaemon(program: Command): void {
       });
       if (!opts.foreground) {
         child.unref();
-
-        console.log(
-          `[remembug] daemon started (port ${config.daemon.port}); detached pid=${child.pid}`,
-        );
+        // Confirm it actually came up. A port conflict makes the detached child
+        // exit immediately (its stdout is discarded), so without this check the
+        // CLI would falsely report success.
+        if (await waitForDaemon(config.daemon.port)) {
+          console.log(
+            `[remembug] daemon started (port ${config.daemon.port}); detached pid=${child.pid}`,
+          );
+        } else {
+          console.error(
+            `[remembug] daemon did not come up on port ${config.daemon.port} ` +
+              `(already running, or port in use?). Check ${remembugPaths().logsDir}/daemon.log`,
+          );
+          process.exitCode = 1;
+        }
       }
     });
 
@@ -70,6 +81,17 @@ export function registerDaemon(program: Command): void {
       const pid = Number(readFileSync(paths.pidFile, 'utf8').trim());
       if (!Number.isFinite(pid) || pid <= 0) {
         console.log('[remembug] pidfile is malformed; removing.');
+        unlinkSync(paths.pidFile);
+        return;
+      }
+      // Verify a daemon is actually answering before signalling: a stale pidfile
+      // (crash / reboot) may name a PID the OS has since recycled to an unrelated
+      // process, and we must not SIGTERM that.
+      const config = readConfig(paths);
+      if (!(await daemonResponds(config.daemon.port))) {
+        console.log(
+          '[remembug] daemon not responding on its port; pidfile is stale, removing (no SIGTERM sent).',
+        );
         unlinkSync(paths.pidFile);
         return;
       }

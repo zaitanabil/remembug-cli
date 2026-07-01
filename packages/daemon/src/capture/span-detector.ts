@@ -21,6 +21,10 @@ import { canonicalizeError, fingerprint } from '../fingerprint/index.js';
 
 interface OpenSpan extends ProblemSpan {
   triggerFingerprint: string;
+  /** The failing Bash command, if the trigger was Bash — used to detect a re-run that passes. */
+  triggerCommand?: string;
+  /** True once an Edit/Write/MultiEdit is seen after the failure (a code change = a candidate fix). */
+  hasFixEdit: boolean;
 }
 
 export interface SpanDetectorEvents {
@@ -72,6 +76,8 @@ export class SpanDetector {
         cwd: payload.cwd,
         started_at: Date.now(),
         triggerFingerprint: fp,
+        triggerCommand: commandOf(payload),
+        hasFixEdit: false,
         trigger: {
           tool_name: payload.tool_name,
           error_signature: canonicalizeError(errorText).slice(0, 200),
@@ -85,14 +91,27 @@ export class SpanDetector {
     }
 
     if (!existing) return;
+    const priorEvents = existing.events.length;
     existing.events.push(toolUseEvent(payload, ''));
 
-    // Heuristic: a successful tool call after a failure is *probably* progress.
-    // Many real fixes are: failed Bash → Edit/Write a file → successful Bash.
-    // We only declare a span "resolved" once we see a success matching the
-    // same trigger (e.g. the same Bash command succeeds), to avoid declaring
-    // resolution on unrelated tool calls.
-    if (sameKindAsTrigger(existing, payload)) {
+    // An Edit/Write/MultiEdit after the failure is a code change — the candidate
+    // fix. It doesn't resolve on its own (we wait for a verifying success), but
+    // it marks the span as having a real fix.
+    if (isEditTool(payload.tool_name)) {
+      existing.hasFixEdit = true;
+      return;
+    }
+
+    // Resolve on a success when there's an actual fix signal:
+    //   (a) a code change happened since the failure (then ANY tool succeeds —
+    //       covers cross-tool verification, not just re-running the same tool), or
+    //   (b) the exact command that failed now succeeds, with something in between
+    //       (an install/config step) — not a bare flaky re-run.
+    const sameCommandReran =
+      existing.triggerCommand !== undefined &&
+      commandOf(payload) === existing.triggerCommand &&
+      priorEvents > 1;
+    if (existing.hasFixEdit || sameCommandReran) {
       existing.resolved = true;
       existing.resolved_at = Date.now();
       this.bySession.delete(payload.session_id);
@@ -120,12 +139,24 @@ export class SpanDetector {
     }
   }
 
-  /** Forward a Stop event. Marks any open span abandoned. */
+  /**
+   * Forward a Stop event. A session that failed, then edited a file, then ended
+   * without an explicit verifying success is STILL a likely fix (the developer
+   * changed code and moved on) — draft it and let the drafter's REFUSE:unresolved
+   * guard reject it if the transcript doesn't actually show a resolution. A span
+   * with no code change is genuinely abandoned.
+   */
   observeStop(payload: StopPayload): void {
     const open = this.bySession.get(payload.session_id);
     if (!open) return;
     this.bySession.delete(payload.session_id);
     if (open.resolved) return;
+    if (open.hasFixEdit) {
+      open.resolved = true;
+      open.resolved_at = Date.now();
+      this.listeners.onResolved(open, open.triggerFingerprint);
+      return;
+    }
     this.listeners.onAbandoned?.(open);
   }
 
@@ -153,8 +184,16 @@ function isFailure(p: PostToolUsePayload): boolean {
   return false;
 }
 
-function sameKindAsTrigger(span: OpenSpan, p: PostToolUsePayload): boolean {
-  return p.tool_name === span.trigger.tool_name && !isFailure(p);
+function isEditTool(toolName: string): boolean {
+  const n = toolName.toLowerCase();
+  return n === 'edit' || n === 'write' || n === 'multiedit';
+}
+
+/** The Bash command for a payload, if any — used to spot a failed command re-running clean. */
+function commandOf(p: PostToolUsePayload): string | undefined {
+  if (p.tool_name.toLowerCase() !== 'bash') return undefined;
+  const cmd = p.tool_input.command;
+  return typeof cmd === 'string' ? cmd.trim() : undefined;
 }
 
 function toolUseEvent(p: PostToolUsePayload, errorText: string): SpanEvent {
@@ -229,8 +268,10 @@ function truncate(s: string, max: number): string {
 }
 
 function stripInternal(s: OpenSpan): ProblemSpan {
-  // strip the internal triggerFingerprint when surfacing externally
-  const { triggerFingerprint: _drop, ...rest } = s;
-  void _drop;
+  // strip internal-only bookkeeping when surfacing externally
+  const { triggerFingerprint: _fp, triggerCommand: _cmd, hasFixEdit: _edit, ...rest } = s;
+  void _fp;
+  void _cmd;
+  void _edit;
   return rest;
 }
