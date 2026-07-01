@@ -9,7 +9,12 @@
  * underlying value, so the audit log itself is safe to inspect.
  */
 import { isHashLike, looksLikePath, shannonEntropy } from './entropy.js';
-import { ENV_LINE, SECRET_PATH_PATTERNS, SECRET_PATTERNS } from './patterns.js';
+import {
+  ENV_LINE,
+  SECRET_NAME_ASSIGNMENT,
+  SECRET_PATH_PATTERNS,
+  SECRET_PATTERNS,
+} from './patterns.js';
 
 export interface ScrubOptions {
   /** Entropy threshold in bits/char for the catch-all layer. Defaults to 4.5. */
@@ -51,6 +56,12 @@ export function scrub(input: string, options: ScrubOptions = {}): ScrubResult {
       return REDACTION(name);
     });
   }
+
+  // Redact the value of any secret-named assignment, whatever its entropy.
+  content = content.replace(SECRET_NAME_ASSIGNMENT, (_match, key: string) => {
+    bumpRedaction(redactions, 'named_secret');
+    return `${key}=${REDACTION('named_secret')}`;
+  });
 
   content = content
     .split('\n')

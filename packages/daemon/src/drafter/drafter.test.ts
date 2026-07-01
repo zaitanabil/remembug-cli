@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Drafter, OllamaProvider, normalizeDraftShape } from './index.js';
+import {
+  AnthropicProvider,
+  Drafter,
+  OllamaProvider,
+  extractYamlBlock,
+  normalizeDraftShape,
+} from './index.js';
 import type { LLMProvider } from './providers/types.js';
 
 const fence = (yaml: string) => '```yaml\n' + yaml + '\n```';
@@ -95,5 +101,83 @@ describe('OllamaProvider', () => {
     await expect(
       new OllamaProvider({ model: 'missing' }).complete({ systemPrompt: 's', userPrompt: 'u' }),
     ).rejects.toThrow(/404 Not Found/);
+  });
+});
+
+describe('AnthropicProvider', () => {
+  it('does not send `temperature` (current Sonnet/Opus models reject it with a 400)', async () => {
+    const provider = new AnthropicProvider({ apiKey: 'sk-ant-test', model: 'claude-sonnet-5' });
+    const client = (
+      provider as unknown as {
+        client: { messages: { create: (p: Record<string, unknown>) => Promise<unknown> } };
+      }
+    ).client;
+    let sent: Record<string, unknown> | undefined;
+    client.messages.create = async (params) => {
+      sent = params;
+      return { content: [{ type: 'text', text: 'ok' }] };
+    };
+    const res = await provider.complete({ systemPrompt: 's', userPrompt: 'u', temperature: 0.2 });
+    expect(res.text).toBe('ok');
+    expect(sent).toBeDefined();
+    expect('temperature' in sent!).toBe(false);
+    expect(sent!.max_tokens).toBe(4096);
+  });
+});
+
+// A full, valid draft in which the model followed the prompt's instruction to
+// put a fenced ```ts block inside `solution`. Before the extractYamlBlock fix
+// this truncated at the inner fence and dropped `verification`/`confidence`.
+const EMBEDDED_FENCE_DOC = [
+  '```yaml',
+  'title: Fix EADDRINUSE when Vitest binds a fixed port',
+  'tags: [vitest, node]',
+  'stack: [node@20, vitest@2]',
+  'problem:',
+  '  symptom: listen EADDRINUSE address already in use :::4000',
+  '  reproduction: bind a server to port 4000 in setup, run vitest multi-threaded',
+  'root_cause: parallel workers collide on a shared fixed listen port',
+  'solution: |',
+  '  Bind to an ephemeral port and read it back:',
+  '  ```ts',
+  '  const srv = app.listen(0);',
+  '  const { port } = srv.address();',
+  '  ```',
+  'verification: run vitest 20x; no EADDRINUSE and each worker logs a distinct port',
+  'confidence: 0.88',
+  '```',
+].join('\n');
+
+describe('extractYamlBlock', () => {
+  it('keeps later keys when the model embeds a fenced code block in `solution`', () => {
+    const body = extractYamlBlock(EMBEDDED_FENCE_DOC)!;
+    expect(body).toContain('verification:');
+    expect(body).toContain('confidence:');
+    expect(body).toContain('```ts'); // inner code fence preserved, not truncated
+  });
+
+  it('still extracts a simple fenced block with no inner fences', () => {
+    const body = extractYamlBlock('```yaml\ntitle: x\nconfidence: 0.5\n```')!;
+    expect(body).toContain('title: x');
+    expect(body).toContain('confidence: 0.5');
+  });
+
+  it('falls back to bare YAML when there is no fence', () => {
+    expect(extractYamlBlock('title: x\nconfidence: 0.5')).toContain('title: x');
+  });
+});
+
+describe('Drafter with embedded code fences', () => {
+  it('drafts a valid entry when the model puts a ```ts block in solution', async () => {
+    const outcome = await new Drafter({ provider: stub(EMBEDDED_FENCE_DOC) }).draft({
+      scrubbedTranscript: 'x',
+      stackHints: [],
+    });
+    expect(outcome.kind).toBe('drafted');
+    if (outcome.kind === 'drafted') {
+      expect(outcome.draft.confidence).toBe(0.88);
+      expect(outcome.draft.solution).toContain('app.listen(0)');
+      expect(outcome.draft.verification).toContain('EADDRINUSE');
+    }
   });
 });
